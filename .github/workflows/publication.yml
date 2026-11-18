@@ -1,0 +1,52 @@
+name: Publication SignalTrader
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  publication:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Télécharger le fichier EX5
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "SignalTrader.ex5"
+
+      - name: Publier la mise à jour
+        env:
+          UPDATE_SECRET: ${{ secrets.UPDATE_SECRET }}
+          TAG: ${{ github.event.release.tag_name }}
+          CHANGELOG: ${{ github.event.release.body }}
+        run: |
+          VERSION="${TAG#v}"
+          SHA256=$(sha256sum SignalTrader.ex5 | cut -d ' ' -f 1)
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/SignalTrader.ex5"
+
+          jq -n \
+            --arg version "$VERSION" \
+            --arg download_url "$URL" \
+            --arg sha256 "$SHA256" \
+            --arg changelog "$CHANGELOG" \
+            '{
+              version: $version,
+              download_url: $download_url,
+              sha256: $sha256,
+              changelog: $changelog
+            }' > update.json
+
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            "https://signaltrader.caraboss511.workers.dev/admin/update" \
+            -H "Authorization: Bearer $UPDATE_SECRET" \
+            -H "Content-Type: application/json" \
+            --data-binary @update.json
